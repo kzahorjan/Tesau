@@ -125,8 +125,14 @@ const GLOBAL_CSS = `
     border-radius:10px;
     background: linear-gradient(135deg, #260025, #3e003c, #260025);
     background-size:200% 200%;
-    animation:bgShift 4s ease infinite;
+    animation:bgShift 12s ease infinite;
     display:flex; align-items:flex-start; padding:16px; gap:8px;
+  }
+  /* Analysing: static bg, no animation — dots handle the visual */
+  .pi-analysing {
+    animation: none;
+    background: #260025;
+    background-size: unset;
   }
   .prompt-input-inner input {
     background:transparent; border:none; outline:none;
@@ -142,6 +148,14 @@ const GLOBAL_CSS = `
   }
   .pi-typing input { color:var(--white); }
   .pi-icon { display:flex; align-items:center; color:var(--purple-200); flex-shrink:0; margin-top:1px; }
+  .pi-dots-canvas {
+    position: absolute;
+    inset: 0 16px;
+    width: calc(100% - 32px);
+    height: 100%;
+    border-radius: 10px;
+    pointer-events: none;
+  }
 
   /* ── Checkbox ── */
   .checkbox-wrap { display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
@@ -157,6 +171,81 @@ const GLOBAL_CSS = `
     transition:background 0.12s;
   }
   .checkbox-box.checked { background:var(--purple-200); }
+
+  /* ── Word Vortex ── */
+  .vortex-modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(13,5,13,0.70);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .vortex-modal {
+    position: relative;
+    width: 700px; height: 640px;
+    max-width: 92vw; max-height: 88vh;
+    background: var(--purple-400b);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .vortex-canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+  }
+  .vortex-label {
+    position: absolute;
+    bottom: 28px; left: 0; right: 0;
+    text-align: center;
+    font-family: 'Inter', sans-serif;
+    font-size: 12px; font-weight: 500;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--purple-300);
+    pointer-events: none;
+  }
+
+  /* Showcase trigger button row */
+  .vortex-demo-wrap {
+    display: flex; align-items: center; gap: 16px;
+  }
+
+  /* ── Pulsing Dots ── */
+  .dots-modal {
+    position: relative;
+    width: 700px; height: 640px;
+    max-width: 92vw; max-height: 88vh;
+    background: var(--purple-400b);
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .dots-canvas {
+    position: absolute;
+    inset: 24px;
+    width: calc(100% - 48px);
+    height: calc(100% - 48px);
+  }
+  .dots-label {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+    pointer-events: none;
+  }
+  .dots-label-main {
+    font-family: 'Inter', sans-serif;
+    font-size: 24px;
+    font-weight: 500;
+    background: linear-gradient(90deg, #e70bdd 0%, #ffb8fc 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    letter-spacing: 0.01em;
+  }
+  .dots-label-main span {
+    font-weight: 500;
+  }
+
 
   /* ── Layout ── */
   .layout-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:20px; padding:0 48px; width:100%; }
@@ -243,8 +332,8 @@ const ButtonIcon = () => (
    GradientStroke SVG sits absolutely on top —
    always exactly 1px, perfect at every corner.
 ───────────────────────────────────────────── */
-export const PrimaryButton = ({ children, withIcon = false, disabled = false }) => (
-  <div className="btn-wrap">
+export const PrimaryButton = ({ children, withIcon = false, disabled = false, onClick }) => (
+  <div className="btn-wrap" onClick={onClick}>
     <button className="btn-base btn-primary" disabled={disabled}>
       {withIcon && <ButtonIcon />}
       <ButtonText>{children}</ButtonText>
@@ -312,6 +401,77 @@ const SearchIcon = () => (
   </svg>
 );
 
+
+/* Dot animation canvas for the analysing state inside PromptInput */
+const PromptDotsCanvas = () => {
+  const canvasRef = useRef(null);
+  const rafRef    = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+
+    const GAP        = 18;
+    const RADIUS     = 1.5;
+    const WAVE_SPEED = 0.9;
+    const WAVE_WIDTH = 80;
+    const BASE_ALPHA = 0.15;
+    const PEAK_ALPHA = 0.85;
+    const DOT_COLOR  = [209, 0, 209];
+    const PAD        = 16; // padding inside canvas on all sides
+
+    let W, H, dots = [], t = 0, last = null;
+
+    const build = () => {
+      W = canvas.offsetWidth;
+      H = canvas.offsetHeight;
+      canvas.width  = W * devicePixelRatio;
+      canvas.height = H * devicePixelRatio;
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      const cx = W / 2, cy = H / 2;
+      const drawW = W - PAD * 2;
+      const drawH = H - PAD * 2;
+      const cols = Math.ceil(drawW / GAP) + 1;
+      const rows = Math.ceil(drawH / GAP) + 1;
+      const offX = PAD + (drawW - (cols - 1) * GAP) / 2;
+      const offY = PAD + (drawH - (rows - 1) * GAP) / 2;
+      dots = [];
+      for (let r = 0; r < rows; r++)
+        for (let col = 0; col < cols; col++) {
+          const x = offX + col * GAP, y = offY + r * GAP;
+          dots.push({ x, y, dist: Math.hypot(x - cx, y - cy) });
+        }
+    };
+
+    const draw = (ts) => {
+      const dt = last ? Math.min((ts - last) / 1000, 0.05) : 0;
+      last = ts; t += dt;
+      ctx.clearRect(0, 0, W, H);
+      const maxDist = Math.hypot(W / 2, H / 2);
+      const waveFront = (t * WAVE_SPEED * 120) % (maxDist + WAVE_WIDTH);
+      dots.forEach(d => {
+        const diff  = Math.abs(d.dist - waveFront);
+        const wave  = diff < WAVE_WIDTH ? Math.pow(1 - diff / WAVE_WIDTH, 2) : 0;
+        const alpha = BASE_ALPHA + wave * (PEAK_ALPHA - BASE_ALPHA);
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${DOT_COLOR[0]},${DOT_COLOR[1]},${DOT_COLOR[2]},${alpha.toFixed(3)})`;
+        ctx.fill();
+      });
+      rafRef.current = requestAnimationFrame(draw);
+    };
+
+    build();
+    const ro = new ResizeObserver(build);
+    ro.observe(canvas);
+    rafRef.current = requestAnimationFrame(draw);
+    return () => { cancelAnimationFrame(rafRef.current); ro.disconnect(); };
+  }, []);
+
+  return <canvas className="pi-dots-canvas" ref={canvasRef} />;
+};
+
 export const PromptInput = ({ state = "search" }) => {
   const [value, setValue] = useState(
     state === "analysing" ? "Analysing..." : state === "typing" ? "Ma" : ""
@@ -319,7 +479,8 @@ export const PromptInput = ({ state = "search" }) => {
   const stateClass = state === "search" ? "pi-search" : state === "analysing" ? "pi-analysing" : "pi-typing";
   return (
     <div className="prompt-outer-wrap">
-      <div className={`prompt-input-inner ${stateClass}`}>
+      <div className={`prompt-input-inner ${stateClass}`} style={{ position:"relative" }}>
+        {state === "analysing" && <PromptDotsCanvas />}
         {state === "search" && <div className="pi-icon"><SearchIcon /></div>}
         <input
           type="text"
@@ -327,6 +488,7 @@ export const PromptInput = ({ state = "search" }) => {
           value={value}
           readOnly={state === "analysing"}
           onChange={e => setValue(e.target.value)}
+          style={{ position:"relative", zIndex:1 }}
         />
       </div>
       <PromptStroke />
@@ -359,6 +521,266 @@ export const Checkbox = ({ label = "Option", defaultChecked = false }) => {
       </div>
       <Body>{label}</Body>
     </label>
+  );
+};
+
+/* ─────────────────────────────────────────────
+   WORD VORTEX
+   Words drift in slow orbital arcs around the
+   centre of the modal, varying in size/opacity
+   to simulate depth. Canvas-based for smooth
+   60 fps animation with no layout thrash.
+───────────────────────────────────────────── */
+const VORTEX_WORDS = [
+  "Make","Voice","Noise","Sale","Test","Hi","Ours",
+  "My","Move","Beat","Drop","Rise","Fade","Wave",
+  "Flow","Sync","Loop","Bass","Echo","Drift",
+  "Pitch","Tone","Chord","Riff","Mix","Cut",
+];
+
+function seededRand(seed) {
+  let s = seed;
+  return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; };
+}
+
+function buildParticles(w, h, words) {
+  const rand = seededRand(42);
+  return words.map((word, i) => {
+    const angle   = rand() * Math.PI * 2;
+    const radiusX = 80 + rand() * (w * 0.36);
+    const radiusY = 40 + rand() * (h * 0.30);
+    const speed   = (0.10 + rand() * 0.25) * (rand() > 0.5 ? 1 : -1); // deg/s
+    const phase   = rand() * Math.PI * 2;
+    const depth   = 0.35 + rand() * 0.65;            // 0..1, higher = foreground
+    const fontSize= Math.round(14 + depth * 22);     // 14–36px
+    const opacity = 0.25 + depth * 0.75;
+    return { word, angle, radiusX, radiusY, speed, phase, depth, fontSize, opacity };
+  });
+}
+
+export const WordVortex = ({ words = VORTEX_WORDS, label = "Analysing library…" }) => {
+  const canvasRef = useRef(null);
+  const stateRef  = useRef({ particles: [], raf: null, t: 0, last: null });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+
+    const resize = () => {
+      canvas.width  = canvas.offsetWidth  * devicePixelRatio;
+      canvas.height = canvas.offsetHeight * devicePixelRatio;
+      ctx.scale(devicePixelRatio, devicePixelRatio);
+      stateRef.current.particles = buildParticles(
+        canvas.offsetWidth, canvas.offsetHeight, words
+      );
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+
+    const draw = (ts) => {
+      const { last } = stateRef.current;
+      const dt = last ? Math.min((ts - last) / 1000, 0.05) : 0;
+      stateRef.current.last = ts;
+      stateRef.current.t += dt;
+
+      const W = canvas.offsetWidth;
+      const H = canvas.offsetHeight;
+      const cx = W / 2;
+      const cy = H / 2;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // Sort by depth so deeper words render first
+      const sorted = [...stateRef.current.particles].sort((a,b) => a.depth - b.depth);
+
+      sorted.forEach(p => {
+        const a = p.angle + stateRef.current.t * (p.speed * 0.4) + p.phase * 0.05;
+        const x = cx + Math.cos(a) * p.radiusX;
+        const y = cy + Math.sin(a) * p.radiusY * 0.55; // flatten vertically
+
+        ctx.save();
+        ctx.font = `${p.depth > 0.7 ? 500 : 400} ${p.fontSize}px Inter, sans-serif`;
+        ctx.fillStyle = p.depth > 0.65
+          ? `rgba(255,255,255,${p.opacity})`
+          : `rgba(174,112,171,${p.opacity})`;
+        ctx.textAlign  = "center";
+        ctx.textBaseline = "middle";
+        ctx.globalAlpha = 1;
+        ctx.fillText(p.word, x, y);
+        ctx.restore();
+      });
+
+      stateRef.current.raf = requestAnimationFrame(draw);
+    };
+
+    stateRef.current.raf = requestAnimationFrame(draw);
+    return () => {
+      cancelAnimationFrame(stateRef.current.raf);
+      ro.disconnect();
+    };
+  }, [words]);
+
+  return (
+    <div className="vortex-modal">
+      <canvas className="vortex-canvas" ref={canvasRef} />
+      <div className="vortex-label">{label}</div>
+    </div>
+  );
+};
+
+/* Modal wrapper — renders vortex over a dimmed backdrop */
+export const WordVortexModal = ({ words, label, onClose }) => (
+  <div className="vortex-modal-backdrop" onClick={onClose}>
+    <div onClick={e => e.stopPropagation()}>
+      <WordVortex words={words} label={label} />
+    </div>
+  </div>
+);
+
+/* ─────────────────────────────────────────────
+   PULSING DOTS
+   A grid of small dots that pulse in a radial
+   wave from the centre — matching the reference
+   screenshot. Canvas-based, 60fps, no DOM nodes
+   per dot.
+   Props:
+     label     – main label text (string)
+     highlight – bolded suffix word e.g. "library..."
+───────────────────────────────────────────── */
+export const PulsingDots = ({
+  label     = "Updating",
+  highlight = "library...",
+}) => {
+  const canvasRef = useRef(null);
+  const rafRef    = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+
+    // Dot grid config
+    const GAP    = 22;   // px between dot centres
+    const RADIUS = 2;    // dot radius px
+    const WAVE_SPEED  = 0.9;   // radial wave speed (units/s)
+    const WAVE_WIDTH  = 120;   // how wide the bright band is
+    const BASE_ALPHA  = 0.18;  // minimum dot opacity
+    const PEAK_ALPHA  = 0.90;  // maximum dot opacity at wave crest
+
+    // Colours: dots are #d100d1 (accent) at low opacity, bright at crest
+    const DOT_COLOR = [209, 0, 209]; // #d100d1
+
+    let W, H, cols, rows, dots = [];
+    let t = 0, last = null;
+
+    const build = () => {
+      W = canvas.offsetWidth;
+      H = canvas.offsetHeight;
+      canvas.width  = W * devicePixelRatio;
+      canvas.height = H * devicePixelRatio;
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+
+      const cx = W / 2, cy = H / 2;
+      cols = Math.ceil(W / GAP) + 2;
+      rows = Math.ceil(H / GAP) + 2;
+      const offX = (W - (cols - 1) * GAP) / 2;
+      const offY = (H - (rows - 1) * GAP) / 2;
+
+      dots = [];
+      for (let r = 0; r < rows; r++) {
+        for (let col = 0; col < cols; col++) {
+          const x = offX + col * GAP;
+          const y = offY + r * GAP;
+          const dist = Math.hypot(x - cx, y - cy);
+          dots.push({ x, y, dist });
+        }
+      }
+    };
+
+    const draw = (ts) => {
+      const dt = last ? Math.min((ts - last) / 1000, 0.05) : 0;
+      last = ts;
+      t += dt;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // Wave radius grows outward, loops with a period based on max dist
+      const maxDist = Math.hypot(W / 2, H / 2);
+      const waveFront = (t * WAVE_SPEED * 120) % (maxDist + WAVE_WIDTH);
+
+      dots.forEach(d => {
+        const diff = Math.abs(d.dist - waveFront);
+        // Smooth bell curve around the wave front
+        const wave = diff < WAVE_WIDTH
+          ? Math.pow(1 - diff / WAVE_WIDTH, 2)
+          : 0;
+        const alpha = BASE_ALPHA + wave * (PEAK_ALPHA - BASE_ALPHA);
+
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${DOT_COLOR[0]},${DOT_COLOR[1]},${DOT_COLOR[2]},${alpha.toFixed(3)})`;
+        ctx.fill();
+      });
+
+      rafRef.current = requestAnimationFrame(draw);
+    };
+
+    build();
+    const ro = new ResizeObserver(build);
+    ro.observe(canvas);
+    rafRef.current = requestAnimationFrame(draw);
+
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      ro.disconnect();
+    };
+  }, []);
+
+  return (
+    <div style={{ position:"relative", display:"inline-flex", borderRadius:16 }}>
+      <div className="dots-modal">
+        <canvas className="dots-canvas" ref={canvasRef} />
+        <div className="dots-label">
+          <div className="dots-label-main">
+            {label} <span>{highlight}</span>
+          </div>
+        </div>
+      </div>
+      <GradientStroke r={16} />
+    </div>
+  );
+};
+
+/* Modal wrapper for PulsingDots */
+export const PulsingDotsModal = ({ label, highlight, onClose }) => (
+  <div className="vortex-modal-backdrop" onClick={onClose}>
+    <div onClick={e => e.stopPropagation()}>
+      <PulsingDots label={label} highlight={highlight} />
+    </div>
+  </div>
+);
+
+
+
+
+const WordVortexDemo = () => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="demo-section">
+      <div className="section-title">Word Vortex — Analysing State</div>
+      <div className="demo-label">Click to open modal · Click backdrop to close</div>
+      <div className="vortex-demo-wrap">
+        <PrimaryButton onClick={() => setOpen(true)}>Open Vortex</PrimaryButton>
+      </div>
+      {open && (
+        <WordVortexModal
+          label="Analysing library…"
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
   );
 };
 
@@ -470,6 +892,12 @@ export default function ComponentLibrary() {
             <Checkbox label="Version B" defaultChecked={true}  />
             <Checkbox label="Version C" defaultChecked={false} />
           </div>
+        </div>
+
+        {/* PULSING DOTS */}
+        <div className="demo-section">
+          <div className="section-title">Pulsing Dots — Updating / Analysing State</div>
+          <PulsingDots label="Updating" highlight="library..." />
         </div>
 
         {/* LAYOUT */}
